@@ -138,7 +138,7 @@ class Profile:
         verbose: bool = False,
         gpu_idx: int = 0,
         time_delta: float = 0.2,
-        output_dir: str | Path = '.profile',
+        output_dir: str | Path = '.tmprofile',
         filename: Optional[str | Path] = None
     ) -> None:
         """ Create a context usable as `with MemoryScope(name, ...) as profiler:`.
@@ -151,7 +151,7 @@ class Profile:
             time_delta (float, optional): Time to wait (in second) between two RAM / VRAM
                 consumption logging. Defaults to 0.2.
             output_dir (str | Path, optional): Directory in which to write the logged values
-                (as json). Defaults to '.profile'.
+                (as json). Defaults to '.tmprofile'.
             filename (str | Path, optional):Name of the saved json file. If no name is given, will
                 use the profiler name (see `name` above). Defaults to None.
         """
@@ -272,7 +272,7 @@ def profile(
     verbose: bool = False,
     gpu_idx: int = 0,
     time_delta: float = 0.2,
-    output_dir: str | Path = '.profile',
+    output_dir: str | Path = '.tmprofile',
     filename: Optional[str | Path] = None
 ) -> FuncT:  # type: ignore
     """ A decorator to profile any function, e.g. :
@@ -290,7 +290,7 @@ def profile(
         time_delta (float, optional): Time to wait (in second) between two RAM / VRAM
             consumption logging. Defaults to 0.2.
         output_dir (str | Path, optional): Directory in which to write the logged values
-            (as json). Defaults to '.profile'.
+            (as json). Defaults to '.tmprofile'.
         name (str | Path, optional): Name of the saved json file. If no name is given, will use the
             decorated function's name and module as module::function_name. Defaults to None.
 

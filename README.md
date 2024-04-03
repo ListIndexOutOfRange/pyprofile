@@ -36,7 +36,7 @@ f(...) # some intensive code
 - `verbose (bool)`: If True, will print logged values at the end of profiling (i.e. on exit as a context manager, on function's return as a decorator). Defaults to False.
 - `gpu_idx (int)`: Which gpu's VRAM consumption has to be monitored. Default to `0`.
 - `time_delta (float)`: Time to wait (in second) between two RAM / VRAM consumption logging. Defaults to `0.2`.
-- `output_dir (str | Path)`: Where to write the logged values (as json). Defaults to `.profile`.
+- `output_dir (str | Path)`: Where to write the logged values (as json). Defaults to `.tmprofile`.
 - `filename (str | Path, optional)`: Name of the saved json file. If no name is given, will used the profiler name (see `name` above).
 
 
