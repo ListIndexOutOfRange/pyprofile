@@ -211,7 +211,7 @@ class Profile:
             filename = Path(Path(filename).stem).with_suffix('.json')
         return output_dir / filename
 
-    def print(self) -> None:
+    def _print(self) -> None:
         table = PrettyTable(["Memory", "Min", "Median", "Max", "Average"])
         for memory in ('ram', 'vram'):
             total = self.data[f'total_{memory}']
@@ -229,6 +229,12 @@ class Profile:
         print('\n' + str(table))
         with open(self._output_file.with_suffix('.txt'), 'w') as openfile:
             openfile.write(str(table))
+
+    def print(self) -> None:
+        try:
+            self._print()
+        except IndexError:  # wrapped function crashed before any values was recorded
+            print('No values recorded.')
 
     def plot(self, percent: bool = False):
         t = len(self.data['ram']) * self.data['time_delta']
@@ -261,12 +267,8 @@ class Profile:
         self._monitor_process.join()
         with open(self._output_file, 'r') as openfile:
             self.data = json.load(openfile)
-        if not self._verbose:
-            return
-        try:
+        if self._verbose():
             self.print()
-        except IndexError:  # wrapped function crashed before any values was recorded
-            pass
 
 
 # __________________________________________ Decorator __________________________________________ #
