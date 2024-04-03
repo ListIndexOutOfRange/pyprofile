@@ -6,6 +6,7 @@ import os
 import re
 import time
 import json
+import signal
 import psutil
 import inspect
 from functools import wraps
@@ -24,7 +25,6 @@ import nvidia_smi  # nvidia-ml-py3
 
 
 # __________________________________________ Utilities __________________________________________ #
-
 
 def alphanumeric_sort(iterable: Iterable[str | Path]) -> list[str]:
     """ Sort the given iterable in alphanumeric order, e.g. ['string1', 'string2', 'string10'].
@@ -86,8 +86,36 @@ def bytes2human(number: int, decimal_unit: bool = True) -> str:
 
 # _______________________________________ parallel logger _______________________________________ #
 
+class GracefulInterruptHandler(object):
+
+    """ From https://gist.github.com/nonZero/2907502. """
+
+    def __init__(self, sig=signal.SIGINT):
+        self.sig = sig
+
+    def __enter__(self):
+        self.interrupted = False
+        self.released = False
+        self.original_handler = signal.getsignal(self.sig)
+        def handler(signum, frame):
+            self.release()
+            self.interrupted = True
+        signal.signal(self.sig, handler)
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.release()
+
+    def release(self):
+        if self.released:
+            return False
+        signal.signal(self.sig, self.original_handler)
+        self.released = True
+        return True
+
+
 def _monitor(pid: int, stop_event: EventClass,
-             gpu_idx: int, time_delta: float, output_file: str | Path) -> None:
+             gpu_idx: int, time_delta: float, output_file: Path) -> None:
     """ Monitor Memory consumption in parallel to a given process (RAM and VRAM).
 
     Args:
@@ -95,7 +123,7 @@ def _monitor(pid: int, stop_event: EventClass,
         stop_event (EventClass): Shared event triggered when the monitoring has to stop
         gpu_idx (int): Which gpu's VRAM consumption has to be monitored.
         time_delta (float): Time to wait between two RAM / VRAM consumption logging.
-        output_file (_type_): Where to write the logged values (as json).
+        output_file (Path): Where to write the logged values (as json).
     """
     # 1. prepare containers
     ram_pid_values = list()
@@ -109,23 +137,25 @@ def _monitor(pid: int, stop_event: EventClass,
     total_vram_value = int(nvidia_smi.nvmlDeviceGetMemoryInfo(handle).total)
     # 4. monitor
     tic = time.perf_counter()
-    while not stop_event.is_set():
-        ram_pid_values.append(get_pid_ram_used_bytes(pid))
-        ram_values.append(get_total_ram_used_bytes())
-        gpu_info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
-        vram_values.append(gpu_info.used)
-        time.sleep(time_delta)  # in s
-    toc = time.perf_counter()
-    elapsed_time = toc - tic
-    # 5. shutdown NVIDIA GPU logger
-    nvidia_smi.nvmlShutdown()
-    # 6. save logged values
-    data = dict(ram=ram_values, ram_pid=ram_pid_values, vram=vram_values,
-                total_ram=total_ram_value, total_vram=total_vram_value,
-                elapsed_time=elapsed_time, time_delta=time_delta)
-    json_object = json.dumps(data, indent=4)
-    with open(output_file, "w") as outfile:
-        outfile.write(json_object)
+    def on_end():
+        toc = time.perf_counter()
+        elapsed_time = toc - tic
+        data = dict(ram=ram_values, ram_pid=ram_pid_values, vram=vram_values,
+                    total_ram=total_ram_value, total_vram=total_vram_value,
+                    elapsed_time=elapsed_time, time_delta=time_delta)
+        json_object = json.dumps(data, indent=4)
+        with open(output_file, "w") as outfile:
+            outfile.write(json_object)
+    with GracefulInterruptHandler() as h:
+        while not stop_event.is_set():
+            ram_pid_values.append(get_pid_ram_used_bytes(pid))
+            ram_values.append(get_total_ram_used_bytes())
+            gpu_info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
+            vram_values.append(gpu_info.used)
+            time.sleep(time_delta)  # in s
+            if h.interrupted:
+                on_end()
+    on_end()
 
 
 # _______________________________________ Context manager _______________________________________ #
@@ -134,7 +164,7 @@ class Profile:
 
     def __init__(
         self,
-        name: str,
+        name: str = 'profile',
         verbose: bool = False,
         gpu_idx: int = 0,
         time_delta: float = 0.2,
@@ -144,7 +174,8 @@ class Profile:
         """ Create a context usable as `with MemoryScope(name, ...) as profiler:`.
 
         Args:
-            name (str): Name of the profiler. Will be used to name the saved file.
+            name (str): Name of the profiler. Can be used to name the saved file.
+                Defaults to 'profile'.
             verbose (bool, optional): If True, will print logged values on exit. Defaults to False.
             gpu_idx (int, optional): Which gpu's VRAM consumption has to be monitored.
                 Defaults to 0.
@@ -152,7 +183,7 @@ class Profile:
                 consumption logging. Defaults to 0.2.
             output_dir (str | Path, optional): Directory in which to write the logged values
                 (as json). Defaults to '.tmprofile'.
-            filename (str | Path, optional):Name of the saved json file. If no name is given, will
+            filename (str | Path, optional): Name of the saved json file. If no name is given, will
                 use the profiler name (see `name` above). Defaults to None.
         """
         self._stop_event = Event()
@@ -164,7 +195,7 @@ class Profile:
         self._output_file = self._prepare_output(output_dir, filename)
 
     def get_run_idx(self, output_dir: Path) -> int:
-        runs = alphanumeric_sort(Path(output_dir).glob(f"run*_profile__{self._name}.json"))
+        runs = alphanumeric_sort(Path(output_dir).glob(f"run*_{self._name}.json"))
         if len(runs) == 0:
             return 1
         return int(Path(runs[-1]).stem.split('run')[1].split('_')[0]) + 1
@@ -172,7 +203,7 @@ class Profile:
     def _prepare_output(self, output_dir: str | Path, filename: Optional[str | Path]) -> Path:
         output_dir = Path(output_dir).resolve()
         output_dir.mkdir(exist_ok=True)
-        filename = filename if filename is not None else f'profile__{self._name}'
+        filename = filename if filename is not None else self._name
         filename = Path(Path(filename).stem).with_suffix('.json')  # works w/ or w/o extension
         if (output_dir / filename).exists():
             idx = self.get_run_idx(output_dir)
@@ -283,7 +314,8 @@ def profile(
     ```
 
     Args:
-        name (str): Name of the profiler. Will be used to name the saved file.
+        name (str): Name of the profiler. Can be used to name the saved file.
+            Defaults to 'profile'.
         verbose (bool, optional): If True, will print logged values on exit. Defaults to False.
         gpu_idx (int, optional): Which gpu's VRAM consumption has to be monitored.
             Defaults to 0.
@@ -291,8 +323,8 @@ def profile(
             consumption logging. Defaults to 0.2.
         output_dir (str | Path, optional): Directory in which to write the logged values
             (as json). Defaults to '.tmprofile'.
-        name (str | Path, optional): Name of the saved json file. If no name is given, will use the
-            decorated function's name and module as module::function_name. Defaults to None.
+        filename (str | Path, optional): Name of the saved json file. If no name is given, will use
+            the decorated function's name and module as module::function_name. Defaults to None.
 
     Returns:
         FuncT: Function to be profiled.
