@@ -12,7 +12,7 @@
 ```python
 from tmprofile import Profile
 
-with Profile(name, ...) as profiler:
+with Profile() as profiler:
     f(...) # some intensive code
 # profile is automatically saved as a json file.
 # display elapsed time, RAM & VRAM consumption evolution
