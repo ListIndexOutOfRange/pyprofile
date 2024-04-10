@@ -267,7 +267,7 @@ class Profile:
         self._monitor_process.join()
         with open(self._output_file, 'r') as openfile:
             self.data = json.load(openfile)
-        if self._verbose():
+        if self._verbose:
             self.print()
 
 
